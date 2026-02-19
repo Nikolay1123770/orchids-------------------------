@@ -6,8 +6,10 @@ import {
   ScrollView,
   TouchableOpacity,
   Switch,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import {
   Settings,
   Shield,
@@ -22,6 +24,7 @@ import {
   Eye,
   Moon,
 } from 'lucide-react-native';
+import { logout } from '../../lib/api';
 
 type ToggleKey =
   | 'autoConnect'
@@ -34,6 +37,7 @@ type ToggleKey =
 const PROTOCOL_OPTIONS = ['VLESS', 'Trojan', 'Hysteria2', 'Shadowsocks'];
 
 export default function SettingsScreen() {
+  const router = useRouter();
   const [toggles, setToggles] = useState<Record<ToggleKey, boolean>>({
     autoConnect: true,
     killSwitch: true,
@@ -47,6 +51,20 @@ export default function SettingsScreen() {
 
   const toggle = (key: ToggleKey) =>
     setToggles((prev) => ({ ...prev, [key]: !prev[key] }));
+
+  const handleLogout = () => {
+    Alert.alert('Выход', 'Вы уверены, что хотите выйти?', [
+      { text: 'Отмена', style: 'cancel' },
+      {
+        text: 'Выйти',
+        style: 'destructive',
+        onPress: () => {
+          logout();
+          router.replace('/auth');
+        },
+      },
+    ]);
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -253,7 +271,7 @@ export default function SettingsScreen() {
         </View>
 
         {/* Logout */}
-        <TouchableOpacity style={styles.logoutBtn}>
+        <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
           <LogOut color="#ef4444" size={18} />
           <Text style={styles.logoutText}>Выйти из аккаунта</Text>
         </TouchableOpacity>

@@ -297,6 +297,12 @@ app.post('/api/vpn/connect', authMiddleware, async (c) => {
       return c.json({ success: false, message: 'Нет активной подписки', needSubscription: true }, 403);
     }
 
+    try {
+      await updateClientExpiry(user.xui_email, user.uuid, sub.expires_at * 1000);
+    } catch (xuiErr) {
+      console.error('Failed to sync with 3x-ui:', xuiErr);
+    }
+
     const vlessUrl = `vless://${user.uuid}@${VPN_CONFIG.address}:${VPN_CONFIG.port}?type=${VPN_CONFIG.network}&path=${encodeURIComponent(VPN_CONFIG.path)}&encryption=none&security=none#SMG-VPN-Frankfurt`;
 
     return c.json({
@@ -312,6 +318,7 @@ app.post('/api/vpn/connect', authMiddleware, async (c) => {
       subscription: { plan: sub.plan, expiresAt: sub.expires_at },
     });
   } catch (err: any) {
+    console.error('VPN connect error:', err);
     return c.json({ success: false, message: err.message }, 500);
   }
 });

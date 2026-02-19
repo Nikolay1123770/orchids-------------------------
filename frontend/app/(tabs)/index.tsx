@@ -10,9 +10,9 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Shield, ShieldCheck, ShieldOff, ChevronRight, Zap, Globe, ArrowDown, ArrowUp } from 'lucide-react-native';
+import { Shield, ShieldCheck, ShieldOff, ChevronRight, Zap, Globe, ArrowDown, ArrowUp, CreditCard } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
-import { connectVPN, disconnectVPN, fetchTraffic, fetchVPNStatus, formatBytes } from '../../lib/api';
+import { connectVPN, disconnectVPN, fetchTraffic, fetchVPNStatus, formatBytes, getMe, getToken } from '../../lib/api';
 
 const { width } = Dimensions.get('window');
 
@@ -31,6 +31,8 @@ export default function HomeScreen() {
   const [ping, setPing] = useState<number | null>(null);
   const [traffic, setTraffic] = useState({ down: 0, up: 0 });
   const [vlessUrl, setVlessUrl] = useState<string | null>(null);
+  const [hasSubscription, setHasSubscription] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   const router = useRouter();
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -38,7 +40,30 @@ export default function HomeScreen() {
   const ringAnim1 = useRef(new Animated.Value(0.8)).current;
   const ringAnim2 = useRef(new Animated.Value(0.6)).current;
 
-  // Timer
+  useEffect(() => {
+    checkAuth();
+  }, []);
+
+  const checkAuth = async () => {
+    const token = getToken();
+    if (!token) {
+      router.replace('/auth');
+      return;
+    }
+
+    try {
+      const result = await getMe();
+      if (result.success) {
+        setUserEmail(result.user?.email);
+        setHasSubscription(result.subscription?.active || false);
+      } else {
+        router.replace('/auth');
+      }
+    } catch (err) {
+      router.replace('/auth');
+    }
+  };
+
   useEffect(() => {
     let timer: ReturnType<typeof setInterval>;
     if (connected) {
@@ -49,16 +74,15 @@ export default function HomeScreen() {
     return () => clearInterval(timer);
   }, [connected]);
 
-  // Traffic polling every 5s when connected
   useEffect(() => {
     if (!connected) return;
     const poll = async () => {
       try {
-        const data = await fetchTraffic('3qs7rjev');
+        const data = await fetchTraffic();
         if (data?.success) {
           setTraffic({
-            down: data.client?.down || data.inbound?.down || 0,
-            up: data.client?.up || data.inbound?.up || 0,
+            down: data.client?.down || 0,
+            up: data.client?.up || 0,
           });
         }
       } catch (_) {}
@@ -68,7 +92,6 @@ export default function HomeScreen() {
     return () => clearInterval(interval);
   }, [connected]);
 
-  // Fetch server ping on mount
   useEffect(() => {
     const checkStatus = async () => {
       try {
@@ -79,7 +102,6 @@ export default function HomeScreen() {
     checkStatus();
   }, []);
 
-  // Connecting animation
   useEffect(() => {
     if (connecting) {
       Animated.loop(
@@ -93,7 +115,6 @@ export default function HomeScreen() {
     }
   }, [connecting]);
 
-  // Connected animation
   useEffect(() => {
     if (connected) {
       Animated.loop(
@@ -124,6 +145,18 @@ export default function HomeScreen() {
   };
 
   const handleToggle = useCallback(async () => {
+    if (!hasSubscription) {
+      Alert.alert(
+        'Нужна подписка',
+        'Для подключения к VPN необходимо оформить подписку',
+        [
+          { text: 'Отмена', style: 'cancel' },
+          { text: 'Оформить', onPress: () => router.push('/subscription') },
+        ]
+      );
+      return;
+    }
+
     if (connected) {
       try {
         await disconnectVPN();
@@ -134,10 +167,19 @@ export default function HomeScreen() {
     } else {
       setConnecting(true);
       try {
-        const data = await connectVPN('3qs7rjev');
+        const data = await connectVPN();
         if (data?.success) {
           setVlessUrl(data.config?.vlessUrl || null);
           setConnected(true);
+        } else if (data?.needSubscription) {
+          Alert.alert(
+            'Нужна подписка',
+            data.message || 'Для подключения к VPN необходимо оформить подписку',
+            [
+              { text: 'Отмена', style: 'cancel' },
+              { text: 'Оформить', onPress: () => router.push('/subscription') },
+            ]
+          );
         } else {
           Alert.alert('Ошибка', data?.message || 'Не удалось подключиться');
         }
@@ -147,7 +189,7 @@ export default function HomeScreen() {
         setConnecting(false);
       }
     }
-  }, [connected]);
+  }, [connected, hasSubscription]);
 
   const statusColor = connected ? '#14d6a0' : connecting ? '#f59e0b' : '#4a5c80';
   const statusText = connected ? 'ПОДКЛЮЧЕНО' : connecting ? 'ПОДКЛЮЧЕНИЕ...' : 'НЕ ПОДКЛЮЧЕНО';
@@ -160,7 +202,6 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        {/* Header */}
         <View style={styles.header}>
           <View style={styles.logoRow}>
             <Shield color="#14d6a0" size={26} />
@@ -172,7 +213,21 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Connection button area */}
+        {!hasSubscription && (
+          <TouchableOpacity
+            style={styles.subscriptionBanner}
+            onPress={() => router.push('/subscription')}>
+            <CreditCard color="#f59e0b" size={24} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.bannerTitle}>Активируйте подписку</Text>
+              <Text style={styles.bannerText}>
+                Для подключения к VPN нужна активная подписка
+              </Text>
+            </View>
+            <ChevronRight color="#f59e0b" size={20} />
+          </TouchableOpacity>
+        )}
+
         <View style={styles.buttonArea}>
           {connected ? (
             <>
@@ -221,10 +276,8 @@ export default function HomeScreen() {
           </Animated.View>
         </View>
 
-        {/* Timer */}
         <Text style={styles.timer}>{formatTime(elapsedSeconds)}</Text>
 
-        {/* Server selector */}
         <TouchableOpacity style={styles.serverCard} onPress={() => router.push('/(tabs)/servers')}>
           <View style={styles.serverLeft}>
             <Text style={styles.serverFlag}>{SERVER.flag}</Text>
@@ -245,7 +298,6 @@ export default function HomeScreen() {
           </View>
         </TouchableOpacity>
 
-        {/* Stats row */}
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
             <ArrowDown color="#14d6a0" size={20} />
@@ -264,7 +316,6 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* VLESS connection info when connected */}
         {connected && vlessUrl ? (
           <View style={styles.vlessCard}>
             <View style={styles.vlessHeader}>
@@ -280,13 +331,14 @@ export default function HomeScreen() {
           </View>
         ) : null}
 
-        {/* Protection info */}
         <View style={styles.infoCard}>
           <ShieldCheck color={connected ? '#14d6a0' : '#4a5c80'} size={20} />
           <Text style={[styles.infoText, { color: connected ? '#14d6a0' : '#4a5c80' }]}>
             {connected
               ? 'Подключено к серверу: 213.176.77.13 (Франкфурт)'
-              : 'Нажмите кнопку для подключения к VPN'}
+              : hasSubscription
+              ? 'Нажмите кнопку для подключения к VPN'
+              : 'Оформите подписку для подключения к VPN'}
           </Text>
         </View>
       </ScrollView>
@@ -342,6 +394,28 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 0.5,
+  },
+  subscriptionBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 12,
+    marginBottom: 8,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.3)',
+  },
+  bannerTitle: {
+    color: '#f59e0b',
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  bannerText: {
+    color: '#8a9bbf',
+    fontSize: 13,
   },
   buttonArea: {
     alignItems: 'center',
