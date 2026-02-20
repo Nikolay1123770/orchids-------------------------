@@ -7,13 +7,12 @@ import {
   ShieldOff,
   ChevronRight,
   Zap,
-  Globe,
   ArrowDown,
   ArrowUp,
   CreditCard,
   Loader2,
-  Copy,
-  Check,
+  Wifi,
+  Lock,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -49,8 +48,7 @@ export function VPNDashboard({
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [ping, setPing] = useState<number | null>(null);
   const [traffic, setTraffic] = useState({ down: 0, up: 0 });
-  const [vlessUrl, setVlessUrl] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [serverIp, setServerIp] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Timer for connection duration
