@@ -12,6 +12,7 @@ import {
   fetchPlans,
   createPayment,
   checkPaymentStatus,
+  verifyPayment,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
@@ -35,6 +36,8 @@ export function SubscriptionScreen({
   const [loadingPlans, setLoadingPlans] = useState(true);
   const [paymentLabel, setPaymentLabel] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState(false);
+  const [pollCount, setPollCount] = useState(0);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -62,9 +65,12 @@ export function SubscriptionScreen({
         const result = await checkPaymentStatus(paymentLabel);
         if (result.success && result.status === "confirmed") {
           setPaymentLabel(null);
+          setPollCount(0);
           if (pollRef.current) clearInterval(pollRef.current);
           await refresh();
           onBack();
+        } else {
+          setPollCount((c) => c + 1);
         }
       } catch {
         /* ignore */
@@ -76,6 +82,26 @@ export function SubscriptionScreen({
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, [paymentLabel, refresh, onBack]);
+
+  const handleManualVerify = async () => {
+    setVerifying(true);
+    try {
+      const result = await verifyPayment();
+      if (result.success && result.activated) {
+        setPaymentLabel(null);
+        setPollCount(0);
+        if (pollRef.current) clearInterval(pollRef.current);
+        await refresh();
+        onBack();
+      } else {
+        setError("Оплата ещё не найдена. Подождите 1-2 минуты и попробуйте снова.");
+      }
+    } catch {
+      setError("Не удалось проверить оплату");
+    } finally {
+      setVerifying(false);
+    }
+  };
 
   const handlePurchase = async () => {
     setLoading(true);
@@ -266,17 +292,59 @@ export function SubscriptionScreen({
       {/* Payment waiting */}
       {paymentLabel && (
         <div
-          className="flex items-center justify-center gap-3 rounded-xl border p-4"
+          className="flex flex-col gap-3 rounded-xl border p-4"
           style={{
             backgroundColor: "rgba(20, 214, 160, 0.1)",
             borderColor: "rgba(20, 214, 160, 0.3)",
           }}
         >
-          <Loader2 className="h-4 w-4 animate-spin" style={{ color: "var(--primary)" }} />
-          <span className="text-sm font-semibold" style={{ color: "var(--primary)" }}>
-            Ожидаем подтверждение оплаты...
-          </span>
+          <div className="flex items-center justify-center gap-3">
+            <Loader2 className="h-4 w-4 animate-spin" style={{ color: "var(--primary)" }} />
+            <span className="text-sm font-semibold" style={{ color: "var(--primary)" }}>
+              Ожидаем подтверждение оплаты...
+            </span>
+          </div>
+          <p className="text-center text-xs" style={{ color: "var(--muted-foreground)" }}>
+            {pollCount > 3
+              ? 'Если вы уже оплатили, нажмите "Проверить оплату"'
+              : "Это может занять до минуты после оплаты"}
+          </p>
         </div>
+      )}
+
+      {/* Manual verify button */}
+      {paymentLabel && pollCount > 2 && (
+        <button
+          onClick={handleManualVerify}
+          disabled={verifying}
+          className="flex items-center justify-center rounded-[var(--radius)] border py-3.5 text-sm font-bold transition-opacity disabled:opacity-60"
+          style={{
+            borderColor: "rgba(20, 214, 160, 0.4)",
+            backgroundColor: "rgba(20, 214, 160, 0.08)",
+            color: "var(--primary)",
+          }}
+        >
+          {verifying ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            "Проверить оплату"
+          )}
+        </button>
+      )}
+
+      {/* Cancel button during waiting */}
+      {paymentLabel && (
+        <button
+          onClick={() => {
+            setPaymentLabel(null);
+            setPollCount(0);
+            if (pollRef.current) clearInterval(pollRef.current);
+          }}
+          className="py-2 text-center text-xs underline"
+          style={{ color: "var(--muted)" }}
+        >
+          Отменить и выбрать другой тариф
+        </button>
       )}
 
       {/* Purchase button */}

@@ -1,5 +1,4 @@
-const BASE_URL =
-  process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3002";
+// API client -- calls local Next.js API routes (same origin)
 
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -25,11 +24,17 @@ async function apiFetch<T = Record<string, unknown>>(
   const token = getToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(`${BASE_URL}${path}`, { headers, ...options });
+  const res = await fetch(path, { headers, ...options });
 
   if (!res.ok) {
-    const errorText = await res.text();
-    throw new Error(`HTTP ${res.status}: ${errorText}`);
+    let errorMessage = `HTTP ${res.status}`;
+    try {
+      const data = await res.json();
+      if (data.message) errorMessage = data.message;
+    } catch {
+      errorMessage = await res.text();
+    }
+    throw new Error(errorMessage);
   }
 
   return res.json() as Promise<T>;
@@ -114,6 +119,15 @@ export async function checkPaymentStatus(label: string) {
   }>(`/api/payment/status?label=${encodeURIComponent(label)}`);
 }
 
+export async function verifyPayment() {
+  return apiFetch<{
+    success: boolean;
+    activated?: boolean;
+    subscription?: { plan: string; expiresAt: number; active: boolean } | null;
+    message?: string;
+  }>("/api/payment/verify", { method: "POST" });
+}
+
 // VPN
 export async function connectVPN() {
   return apiFetch<{
@@ -175,9 +189,9 @@ export async function fetchServers() {
 
 // Helpers
 export function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 Б";
+  if (bytes === 0) return "0 \u0411";
   const k = 1024;
-  const sizes = ["Б", "КБ", "МБ", "ГБ", "ТБ"];
+  const sizes = ["\u0411", "\u041A\u0411", "\u041C\u0411", "\u0413\u0411", "\u0422\u0411"];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
 }
