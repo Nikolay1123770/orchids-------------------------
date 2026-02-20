@@ -12,7 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Crown, Check, ArrowLeft, ExternalLink } from 'lucide-react-native';
 import { router } from 'expo-router';
-import { fetchPlans, createPayment, checkPaymentStatus, getMe } from '../lib/api';
+import { fetchPlans, createPayment, checkPaymentStatus, verifyPayment, getMe } from '../lib/api';
 
 type Plan = {
   id: string;
@@ -28,6 +28,8 @@ export default function SubscriptionScreen() {
   const [loading, setLoading] = useState(false);
   const [loadingPlans, setLoadingPlans] = useState(true);
   const [paymentLabel, setPaymentLabel] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState(false);
+  const [pollCount, setPollCount] = useState(0);
 
   useEffect(() => {
     loadPlans();
@@ -35,7 +37,8 @@ export default function SubscriptionScreen() {
 
   useEffect(() => {
     if (paymentLabel) {
-      const interval = setInterval(checkStatus, 3000);
+      setPollCount(0);
+      const interval = setInterval(checkStatus, 4000);
       return () => clearInterval(interval);
     }
   }, [paymentLabel]);
@@ -57,15 +60,43 @@ export default function SubscriptionScreen() {
     if (!paymentLabel) return;
 
     try {
+      // checkPaymentStatus now also queries YooMoney API server-side if still pending
       const result = await checkPaymentStatus(paymentLabel);
       if (result.success && result.status === 'confirmed') {
         setPaymentLabel(null);
-        Alert.alert('Успешно', 'Подписка активирована!', [
+        setPollCount(0);
+        Alert.alert('Подписка активирована!', 'VPN готов к использованию. Нажмите OK для подключения.', [
           { text: 'OK', onPress: () => router.replace('/(tabs)') },
         ]);
+        return;
       }
+
+      setPollCount((c) => c + 1);
     } catch (err) {
       console.log('Check status error:', err);
+    }
+  };
+
+  const handleManualVerify = async () => {
+    setVerifying(true);
+    try {
+      const result = await verifyPayment();
+      if (result.success && result.activated) {
+        setPaymentLabel(null);
+        Alert.alert('Подписка активирована!', 'VPN готов к использованию.', [
+          { text: 'OK', onPress: () => router.replace('/(tabs)') },
+        ]);
+      } else {
+        Alert.alert(
+          'Оплата не найдена',
+          'Платёж ещё не поступил. Если вы уже оплатили, подождите 1-2 минуты и попробуйте снова.',
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (err: any) {
+      Alert.alert('Ошибка', err.message || 'Не удалось проверить оплату');
+    } finally {
+      setVerifying(false);
     }
   };
 
@@ -182,29 +213,65 @@ export default function SubscriptionScreen() {
         {paymentLabel && (
           <View style={styles.waitingCard}>
             <ActivityIndicator color="#14d6a0" size="small" />
-            <Text style={styles.waitingText}>Ожидаем подтверждение оплаты...</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.waitingText}>Ожидаем подтверждение оплаты...</Text>
+              <Text style={styles.waitingSubtext}>
+                {pollCount > 3
+                  ? 'Если вы оплатили, нажмите "Проверить оплату"'
+                  : 'Это может занять до минуты после оплаты'}
+              </Text>
+            </View>
           </View>
         )}
 
+        {paymentLabel && pollCount > 2 && (
+          <TouchableOpacity
+            style={[styles.verifyButton, verifying && styles.purchaseButtonDisabled]}
+            onPress={handleManualVerify}
+            disabled={verifying}>
+            {verifying ? (
+              <ActivityIndicator color="#14d6a0" />
+            ) : (
+              <Text style={styles.verifyButtonText}>Проверить оплату</Text>
+            )}
+          </TouchableOpacity>
+        )}
+
         <TouchableOpacity
-          style={[styles.purchaseButton, loading && styles.purchaseButtonDisabled]}
+          style={[styles.purchaseButton, (loading || !!paymentLabel) && styles.purchaseButtonDisabled]}
           onPress={handlePurchase}
           disabled={loading || !!paymentLabel}>
           {loading ? (
             <ActivityIndicator color="#0a0f1e" />
+          ) : paymentLabel ? (
+            <Text style={styles.purchaseButtonText}>Ожидание оплаты...</Text>
           ) : (
             <>
               <Text style={styles.purchaseButtonText}>
-                Оплатить{' '}
-                {plans.find((p) => p.id === selectedPlan)?.price || 0} ₽
+                {'Оплатить '}
+                {plans.find((p) => p.id === selectedPlan)?.price || 0}
+                {' \u20BD'}
               </Text>
               <ExternalLink color="#0a0f1e" size={18} />
             </>
           )}
         </TouchableOpacity>
 
+        {paymentLabel && (
+          <TouchableOpacity
+            style={styles.cancelPaymentButton}
+            onPress={() => {
+              setPaymentLabel(null);
+              setPollCount(0);
+            }}>
+            <Text style={styles.cancelPaymentText}>Отменить и выбрать другой тариф</Text>
+          </TouchableOpacity>
+        )}
+
         <Text style={styles.disclaimer}>
-          После оплаты через ЮMoney подписка активируется автоматически
+          {paymentLabel
+            ? 'Оплатите в открывшемся браузере. Подписка активируется автоматически.'
+            : 'После оплаты через ЮMoney подписка активируется автоматически'}
         </Text>
       </ScrollView>
     </SafeAreaView>
@@ -380,6 +447,35 @@ const styles = StyleSheet.create({
     color: '#14d6a0',
     fontSize: 14,
     fontWeight: '600',
+  },
+  waitingSubtext: {
+    color: '#8a9bbf',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  verifyButton: {
+    backgroundColor: 'rgba(20, 214, 160, 0.15)',
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(20, 214, 160, 0.4)',
+  },
+  verifyButtonText: {
+    color: '#14d6a0',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  cancelPaymentButton: {
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  cancelPaymentText: {
+    color: '#4a5c80',
+    fontSize: 13,
+    textDecorationLine: 'underline',
   },
   purchaseButton: {
     backgroundColor: '#14d6a0',

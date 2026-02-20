@@ -91,6 +91,14 @@ export function confirmPayment(label: string, opId: string) {
   ).run('confirmed', opId, label);
 }
 
+export function getPendingPaymentsForUser(userId: number): Payment[] {
+  return db
+    .prepare(
+      'SELECT * FROM payments WHERE user_id = ? AND status = ? ORDER BY created_at DESC LIMIT 10'
+    )
+    .all(userId, 'pending') as Payment[];
+}
+
 // ─── Types ─────────────────────────────────────────────────────────────────────
 export interface User {
   id: number;

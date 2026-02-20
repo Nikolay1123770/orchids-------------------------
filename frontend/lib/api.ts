@@ -75,6 +75,10 @@ export async function checkPaymentStatus(label: string) {
   return apiFetch(`/api/payment/status?label=${encodeURIComponent(label)}`);
 }
 
+export async function verifyPayment() {
+  return apiFetch('/api/payment/verify', { method: 'POST' });
+}
+
 export async function connectVPN() {
   return apiFetch('/api/vpn/connect', { method: 'POST' });
 }

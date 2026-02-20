@@ -13,6 +13,7 @@ import {
   createPayment,
   getPaymentByLabel,
   confirmPayment,
+  getPendingPaymentsForUser,
 } from './db';
 import {
   getInbounds,
@@ -30,6 +31,26 @@ const JWT_SECRET = process.env.JWT_SECRET || 'smgvpn_secret_2025_$#@!';
 const YOOMONEY_TOKEN = process.env.YOOMONEY_TOKEN || '4100118889570559.5471FE93036FACB51259800442ED5D0F29CDED2C77B14C6871BF92A581C1F86ABA3F7E9F4E7C783BB985C11F23553601954C7CBC216A723FBD010627D92285A53E0F2EA68DA75C135BA0EBB318679FF772D2CF6FB9890E70B1E813B29EDF84FC7111B5D72C598E94655E77C679595195E44141B807535C9F23F47074C47A93AD';
 const YOOMONEY_WALLET = process.env.YOOMONEY_WALLET || '4100118889570559';
 const BACKEND_URL = process.env.BACKEND_URL || 'https://3002-c1addcf3-c7d4-41c8-961b-e54d94780c7d.orchids.cloud';
+
+// ─── Helper: activate subscription after confirmed payment ─────────────────
+async function activateSubscription(payment: { user_id: number; plan: string }, operationId: string, label: string) {
+  confirmPayment(label, operationId);
+
+  const duration = PLAN_DURATION[payment.plan] || 30 * 24 * 3600;
+  const expiresAt = Math.floor(Date.now() / 1000) + duration;
+  createSubscription(payment.user_id, payment.plan, expiresAt);
+
+  const user = getUserById(payment.user_id);
+  if (user) {
+    try {
+      await updateClientExpiry(user.xui_email, user.uuid, expiresAt * 1000);
+    } catch (e) {
+      console.error('Failed to update xui client:', e);
+    }
+  }
+
+  console.log(`Subscription activated: user=${payment.user_id} plan=${payment.plan} opid=${operationId}`);
+}
 
 // Plan durations in seconds
 const PLAN_DURATION: Record<string, number> = {
@@ -217,25 +238,7 @@ app.post('/api/payment/webhook', async (c) => {
       return c.text('wrong amount', 400);
     }
 
-    // Confirm payment in DB
-    confirmPayment(label, operation_id);
-
-    // Activate subscription
-    const duration = PLAN_DURATION[payment.plan] || 30 * 24 * 3600;
-    const expiresAt = Math.floor(Date.now() / 1000) + duration;
-    createSubscription(payment.user_id, payment.plan, expiresAt);
-
-    // Update 3x-ui client expiry
-    const user = getUserById(payment.user_id);
-    if (user) {
-      try {
-        await updateClientExpiry(user.xui_email, user.uuid, expiresAt * 1000); // xui uses ms
-      } catch (e) {
-        console.error('Failed to update xui client:', e);
-      }
-    }
-
-    console.log(`Payment confirmed: user=${payment.user_id} plan=${payment.plan} opid=${operation_id}`);
+    await activateSubscription(payment, operation_id, label);
     return c.text('ok');
   } catch (err: any) {
     console.error('Webhook error:', err);
@@ -282,7 +285,87 @@ app.get('/api/payment/status', authMiddleware, async (c) => {
   if (!payment || payment.user_id !== userId) {
     return c.json({ success: false, message: 'Not found' }, 404);
   }
+
+  // If still pending, try to check via YooMoney API
+  if (payment.status === 'pending') {
+    try {
+      const found = await checkYooMoneyPayment(label, payment.amount);
+      if (found) {
+        await activateSubscription(payment, found.operation_id, label);
+        return c.json({ success: true, status: 'confirmed', confirmedAt: Math.floor(Date.now() / 1000) });
+      }
+    } catch (e) {
+      console.error('YooMoney API check error:', e);
+    }
+  }
+
   return c.json({ success: true, status: payment.status, confirmedAt: payment.confirmed_at });
+});
+
+// ─── YooMoney API: check operation history for a specific label ───────────────
+async function checkYooMoneyPayment(label: string, expectedAmount: number): Promise<{ operation_id: string } | null> {
+  try {
+    const res = await fetch('https://yoomoney.ru/api/operation-history', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${YOOMONEY_TOKEN}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        type: 'deposition',
+        label: label,
+        records: '1',
+      }).toString(),
+    });
+
+    if (!res.ok) {
+      console.error('YooMoney API error:', res.status, await res.text());
+      return null;
+    }
+
+    const data = await res.json() as any;
+    if (data.operations && data.operations.length > 0) {
+      const op = data.operations[0];
+      if (op.status === 'success' && Math.abs(op.amount) >= expectedAmount) {
+        return { operation_id: op.operation_id };
+      }
+    }
+    return null;
+  } catch (e) {
+    console.error('YooMoney API fetch error:', e);
+    return null;
+  }
+}
+
+// ─── Manual verify: check all pending payments for current user ───────────────
+app.post('/api/payment/verify', authMiddleware, async (c) => {
+  const userId = c.get('userId') as number;
+  const pendingPayments = getPendingPaymentsForUser(userId);
+
+  let activated = false;
+  for (const payment of pendingPayments) {
+    try {
+      const found = await checkYooMoneyPayment(payment.label, payment.amount);
+      if (found) {
+        await activateSubscription(payment, found.operation_id, payment.label);
+        activated = true;
+        break;
+      }
+    } catch (e) {
+      console.error('Verify check error:', e);
+    }
+  }
+
+  if (activated) {
+    const sub = getActiveSubscription(userId);
+    return c.json({
+      success: true,
+      activated: true,
+      subscription: sub ? { plan: sub.plan, expiresAt: sub.expires_at, active: sub.active === 1 } : null,
+    });
+  }
+
+  return c.json({ success: true, activated: false, message: 'Оплата ещё не найдена. Попробуйте позже.' });
 });
 
 // ─── VPN Connect (requires active subscription) ───────────────────────────────
