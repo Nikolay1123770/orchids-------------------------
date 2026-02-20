@@ -4,7 +4,10 @@ export const YOOMONEY_TOKEN =
 
 export const YOOMONEY_WALLET = process.env.YOOMONEY_WALLET || "4100118889570559";
 
+export const TRIAL_DURATION = 2 * 24 * 3600; // 2 days in seconds
+
 export const PLAN_DURATION: Record<string, number> = {
+  trial: TRIAL_DURATION,
   "1_month": 30 * 24 * 3600,
   "3_month": 90 * 24 * 3600,
   "6_month": 180 * 24 * 3600,

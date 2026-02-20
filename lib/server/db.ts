@@ -124,3 +124,59 @@ export function getPendingPaymentsForUser(userId: number): Payment[] {
   });
   return result.sort((a, b) => b.created_at - a.created_at).slice(0, 10);
 }
+
+// ─── Admin helpers ──────────────────────────────────────────────────────────
+
+export function getAllUsers(): User[] {
+  return Array.from(users.values()).sort((a, b) => b.created_at - a.created_at);
+}
+
+export function getAllSubscriptions(): Subscription[] {
+  return [...subscriptions].sort((a, b) => b.created_at - a.created_at);
+}
+
+export function getAllPayments(): Payment[] {
+  return Array.from(payments.values()).sort((a, b) => b.created_at - a.created_at);
+}
+
+export function getSubscriptionsForUser(userId: number): Subscription[] {
+  return subscriptions
+    .filter((s) => s.user_id === userId)
+    .sort((a, b) => b.created_at - a.created_at);
+}
+
+export function deactivateSubscription(userId: number) {
+  subscriptions.forEach((s) => {
+    if (s.user_id === userId) s.active = 0;
+  });
+}
+
+export function grantSubscription(userId: number, plan: string, durationSecs: number) {
+  // Deactivate old
+  subscriptions.forEach((s) => {
+    if (s.user_id === userId) s.active = 0;
+  });
+  subIdCounter++;
+  const expiresAt = Math.floor(Date.now() / 1000) + durationSecs;
+  subscriptions.push({
+    id: subIdCounter,
+    user_id: userId,
+    plan,
+    expires_at: expiresAt,
+    active: 1,
+    created_at: Math.floor(Date.now() / 1000),
+  });
+  return expiresAt;
+}
+
+export function deleteUser(userId: number) {
+  const user = users.get(userId);
+  if (user) {
+    usersByEmail.delete(user.email);
+    users.delete(userId);
+  }
+  // Deactivate subscriptions
+  subscriptions.forEach((s) => {
+    if (s.user_id === userId) s.active = 0;
+  });
+}

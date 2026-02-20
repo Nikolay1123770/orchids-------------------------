@@ -39,6 +39,10 @@ export function VPNDashboard({
 }) {
   const { subscription } = useAuth();
   const hasSubscription = subscription?.active || false;
+  const isTrial = hasSubscription && subscription?.plan === "trial";
+  const trialDaysLeft = isTrial && subscription?.expiresAt
+    ? Math.max(0, Math.ceil((subscription.expiresAt - Date.now() / 1000) / 86400))
+    : 0;
 
   const [connected, setConnected] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -178,8 +182,43 @@ export function VPNDashboard({
         </div>
       </div>
 
+      {/* Trial banner */}
+      {isTrial && (
+        <button
+          onClick={() => onNavigate("subscription")}
+          className="flex items-center gap-3 rounded-2xl border p-4 text-left transition-opacity hover:opacity-90"
+          style={{
+            backgroundColor: "rgba(59, 130, 246, 0.1)",
+            borderColor: "rgba(59, 130, 246, 0.3)",
+          }}
+        >
+          <Zap
+            className="h-6 w-6 shrink-0"
+            style={{ color: "#3b82f6" }}
+          />
+          <div className="flex-1">
+            <div
+              className="text-[15px] font-bold"
+              style={{ color: "#3b82f6" }}
+            >
+              {"Пробный период \u2014 "}
+              {trialDaysLeft > 0
+                ? `${trialDaysLeft} ${trialDaysLeft === 1 ? "день" : "дня"}`
+                : "истекает сегодня"}
+            </div>
+            <div className="text-[13px]" style={{ color: "var(--muted-foreground)" }}>
+              Оформите подписку для продолжения
+            </div>
+          </div>
+          <ChevronRight
+            className="h-5 w-5 shrink-0"
+            style={{ color: "#3b82f6" }}
+          />
+        </button>
+      )}
+
       {/* Subscription banner */}
-      {!hasSubscription && (
+      {!hasSubscription && !isTrial && (
         <button
           onClick={() => onNavigate("subscription")}
           className="flex items-center gap-3 rounded-2xl border p-4 text-left transition-opacity hover:opacity-90"
